@@ -153,6 +153,7 @@ try {
   if(await evaluate(`Array.from(document.querySelectorAll('.otp-cells input')).some(e=>e.value)`)) throw new Error('OTP must not persist across reload');
   const stored = await evaluate(`JSON.parse(sessionStorage.getItem('gloomi.email-verification.v1'))`);
   if(stored.email !== 'test@example.com' || stored.step !== 'code' || !stored.retryAt || 'code' in stored || 'password' in stored) throw new Error('Invalid persisted verification state');
+  await wait(`!!document.querySelector('.resend-code')`, 'resend control after reload');
   if(!(await evaluate(`document.querySelector('.resend-code').disabled`))) throw new Error('Backend cooldown lost on reload');
   await click('.verification-back'); await wait(`!!document.querySelector('.verification-request')`, 'back to request step');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -199,7 +200,29 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await click('.mobile-nav button:nth-child(1)'); await wait(`!!document.querySelector('.post')`, 'mobile feed');
   await screenshot('mobile-feed');
-  if(await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error('Mobile horizontal overflow');
+  for (const width of [320, 360, 375, 390, 393, 412, 430, 768]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: width <= 768 });
+    await wait(`document.documentElement.clientWidth===${width}`, `viewport ${width}px`);
+    if(await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error(`Mobile/tablet feed horizontal overflow at ${width}px`);
+    if (width === 390) await screenshot('mobile-feed-390');
+    if (width === 768) await screenshot('tablet-feed-768');
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
+  if(await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error('Landscape feed horizontal overflow at 844x390');
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await click('.mobile-nav button:nth-child(5)'); await wait(`!!document.querySelector('.figma-profile')`, 'mobile profile');
+  for (const width of [320, 390, 430]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    if(await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error(`Profile horizontal overflow at ${width}px`);
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await click('.mobile-header a[href="/messages"]'); await wait(`!!document.querySelector('.messenger')`, 'mobile direct messages');
+  for (const width of [320, 390, 430]) {
+    await call('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    if(await evaluate('document.documentElement.scrollWidth > innerWidth')) throw new Error(`Direct messages horizontal overflow at ${width}px`);
+  }
+  await call('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await click('.mobile-nav button:nth-child(1)'); await wait(`!!document.querySelector('.post')`, 'mobile feed');
   await click('.mobile-nav button:nth-child(2)'); await wait(`!!document.querySelector('.searchbar')`, 'mobile search');
   await fill('.searchbar input', 'anna'); await wait(`!!document.querySelector('.user-results .person-result')`, 'user search');
   await click('.mobile-nav button:nth-child(4)'); await wait(`document.body.innerText.includes('Ваши люди скоро будут здесь')`, 'notifications');
