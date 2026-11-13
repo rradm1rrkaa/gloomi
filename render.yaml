@@ -3,7 +3,7 @@ services:
     name: gloomi-api
     runtime: node
     plan: free
-    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm db:generate && corepack pnpm build:api
+    buildCommand: corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm db:generate && corepack pnpm build:api
     startCommand: corepack pnpm --filter @gloomi/api start
     healthCheckPath: /api/health
     envVars:
