@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'node:stream';
@@ -8,7 +8,7 @@ export const MEDIA_STORAGE = Symbol('MEDIA_STORAGE');
 
 export type StoredObject = { contentType?: string; size?: number; prefix: Uint8Array };
 export interface MediaStorage {
-  createUpload(key: string, contentType: string, maxBytes: number): Promise<{ url: string; fields: Record<string, string>; provider?: 'local' | 's3'; method?: 'PUT' | 'POST' }>;
+  createUpload(key: string, contentType: string, maxBytes: number): Promise<{ url: string; fields: Record<string, string>; provider?: 'local' | 's3' | 's3-put'; method?: 'PUT' | 'POST' }>;
   inspect(key: string, contentType?: string): Promise<StoredObject>;
   readUrl(key: string, contentType: string): Promise<string>;
   remove(key: string): Promise<void>;
@@ -18,7 +18,8 @@ export interface MediaStorage {
 @Injectable()
 export class S3MediaStorage implements MediaStorage, OnModuleDestroy {
   private readonly region = process.env.AWS_REGION || 'eu-central-1';
-  private readonly client = new S3Client({ region: this.region });
+  private readonly endpoint = process.env.S3_ENDPOINT;
+  private readonly client = new S3Client({ region: this.endpoint ? (process.env.AWS_REGION || 'auto') : this.region, ...(this.endpoint ? { endpoint: this.endpoint, forcePathStyle: true } : {}) });
 
   onModuleDestroy() { this.client.destroy(); }
 
@@ -29,6 +30,10 @@ export class S3MediaStorage implements MediaStorage, OnModuleDestroy {
   }
 
   async createUpload(key: string, contentType: string, maxBytes: number) {
+    if (this.endpoint) {
+      const url = await getSignedUrl(this.client, new PutObjectCommand({ Bucket: this.bucket(), Key: key, ContentType: contentType }), { expiresIn: 300 });
+      return { url, fields: {}, provider: 's3-put' as const, method: 'PUT' as const };
+    }
     const { url, fields } = await createPresignedPost(this.client, {
       Bucket: this.bucket(),
       Key: key,

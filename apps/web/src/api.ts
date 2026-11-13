@@ -22,6 +22,9 @@ export async function uploadMedia(file: File, intent: 'POST' | 'STORY' | 'AVATAR
   if (upload.provider === 'local') {
     await api.put(upload.uploadUrl, file, { headers: { 'Content-Type': file.type }, signal,
       onUploadProgress: event => { if (event.total) onProgress?.(Math.min(95, Math.round(event.loaded / event.total * 95))); } });
+  } else if (upload.provider === 's3-put') {
+    await axios.put(upload.uploadUrl as string, file, { headers: { 'Content-Type': file.type }, signal, withCredentials: false,
+      onUploadProgress: event => { if (event.total) onProgress?.(Math.min(95, Math.round(event.loaded / event.total * 95))); } });
   } else {
   const form = new FormData();
   for (const [key, value] of Object.entries(upload.fields as Record<string, string>)) form.append(key, value);

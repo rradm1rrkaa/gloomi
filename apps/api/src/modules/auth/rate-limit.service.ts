@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { createHmac } from 'node:crypto';
 import { localDirectEmail } from '../mail/email-delivery-mode';
@@ -21,12 +21,18 @@ const rateLimited = (retryAfterSeconds: number) => new HttpException({ code: 'RA
 
 @Injectable()
 export class RateLimitService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RateLimitService.name);
   private redis?: Redis;
   private readonly local = new Map<string, { count: number; expiresAt: number }>();
 
   async onModuleInit() {
     // A stale local REDIS_URL must not prevent SMTP-only development.
     if (localDirectEmail()) return;
+    if (process.env.RATE_LIMIT_STORE === 'memory') {
+      if (process.env.NODE_ENV === 'production') this.logger.warn('Using process-local production rate limits; counters reset on restart and are not shared between instances');
+      return;
+    }
+    if (process.env.RATE_LIMIT_STORE && process.env.RATE_LIMIT_STORE !== 'redis') throw new Error('RATE_LIMIT_STORE must be redis or memory');
     const url = process.env.REDIS_URL;
     if (!url) {
       if (process.env.NODE_ENV === 'production') throw new Error('REDIS_URL is required for distributed auth rate limiting');
@@ -61,7 +67,7 @@ export class RateLimitService implements OnModuleInit, OnModuleDestroy {
         throw new ServiceUnavailableException('Rate limit service is temporarily unavailable');
       }
     }
-    if (process.env.NODE_ENV === 'production') throw new ServiceUnavailableException('Rate limit service is not configured');
+    if (process.env.NODE_ENV === 'production' && process.env.RATE_LIMIT_STORE !== 'memory') throw new ServiceUnavailableException('Rate limit service is not configured');
     for (const { key, rule } of entries) {
       const bucket = this.local.get(key);
       if (bucket && bucket.expiresAt > now && bucket.count >= rule.max) throw rateLimited(Math.max(1, Math.ceil((bucket.expiresAt - now) / 1000)));

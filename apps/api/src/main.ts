@@ -22,6 +22,6 @@ async function bootstrap() {
   app.enableCors({ origin: webOrigins(), credentials: true, allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'], methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'] });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
-  await app.listen(process.env.PORT || 3000);
+  await app.listen(Number(process.env.PORT || 3000), '0.0.0.0');
 }
 void bootstrap();

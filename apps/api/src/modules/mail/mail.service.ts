@@ -14,8 +14,21 @@ export class MailService implements OnModuleInit, OnModuleDestroy {
   private transporter?: Transporter;
   private lastVerifiedAt?: Date;
   private lastFailure?: string;
+  private useResend = false;
 
   async onModuleInit() {
+    const transport = process.env.EMAIL_TRANSPORT || 'smtp';
+    if (!['smtp', 'resend'].includes(transport)) throw new Error('EMAIL_TRANSPORT must be smtp or resend');
+    if (transport === 'resend') {
+      if (!process.env.RESEND_API_KEY || !process.env.SMTP_FROM) {
+        this.lastFailure = 'EMAIL_API_NOT_CONFIGURED';
+        this.logger.warn('Resend email API is not configured; email delivery is unavailable');
+        return;
+      }
+      this.useResend = true;
+      this.lastFailure = undefined;
+      return;
+    }
     const { SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM } = process.env;
     const port = Number(process.env.SMTP_PORT || 465);
     const localMailpit = ['localhost', '127.0.0.1', 'mailpit'].includes(SMTP_HOST || '') && port === 1025;
@@ -62,30 +75,48 @@ export class MailService implements OnModuleInit, OnModuleDestroy {
   }
 
   health() {
-    return { status: this.lastFailure ? 'unavailable' : this.lastVerifiedAt ? 'ok' : 'unknown', lastVerifiedAt: this.lastVerifiedAt, ...(this.lastFailure ? { reason: this.lastFailure } : {}) };
+    const status = this.lastFailure ? 'unavailable' : this.lastVerifiedAt ? 'ok' : this.useResend ? 'configured' : 'unknown';
+    return { provider: this.useResend ? 'resend' : 'smtp', status, lastVerifiedAt: this.lastVerifiedAt, ...(this.lastFailure ? { reason: this.lastFailure } : {}) };
   }
 
   private safeFailure(error: unknown) {
     const code = (error as { code?: unknown } | null)?.code;
-    return typeof code === 'string' && ['EAUTH', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EDNS', 'EENVELOPE', 'EMESSAGE'].includes(code) ? code : 'SMTP_ERROR';
+    return typeof code === 'string' && ['EAUTH', 'ECONNECTION', 'ESOCKET', 'ETIMEDOUT', 'EDNS', 'EENVELOPE', 'EMESSAGE', 'EMAIL_API_ERROR'].includes(code) ? code : 'SMTP_ERROR';
   }
 
   async send(kind: EmailOutboxKind, payload: EmailPayload, messageId: string) {
     const { SMTP_FROM, SMTP_FROM_NAME } = process.env;
-    if (!this.transporter || !SMTP_FROM) throw new ServiceUnavailableException({ code: 'EMAIL_DELIVERY_FAILED', message: 'Отправка email не настроена. Проверьте SMTP-конфигурацию.' });
+    if ((!this.transporter && !this.useResend) || !SMTP_FROM) throw new ServiceUnavailableException({ code: 'EMAIL_DELIVERY_FAILED', message: 'Отправка email не настроена. Проверьте SMTP-конфигурацию.' });
     const isReset = kind === EmailOutboxKind.RESET_PASSWORD;
     const code = escapeHtml(payload.code);
     const product = 'gloomi';
     try {
+    const subject = isReset ? 'Reset your gloomi password' : 'Your gloomi verification code';
+    const text = isReset ? `Your password reset code is ${payload.code}. It expires in 10 minutes.` : `Your gloomi code is ${payload.code}. It expires in 10 minutes.`;
+    const html = isReset
+      ? `<p>Use this code to reset your password:</p><strong style="font-size:28px;letter-spacing:8px">${code}</strong><p>It expires in 10 minutes.</p>`
+      : `<p>Your gloomi verification code:</p><strong style="font-size:28px;letter-spacing:8px">${code}</strong><p>It expires in 10 minutes.</p>`;
+    if (this.useResend) {
+      const name = (SMTP_FROM_NAME || product).replace(/[<>\r\n]/g, '');
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: `${name} <${SMTP_FROM}>`, to: [payload.to], subject, text, html }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) { const error = new Error('Email API request failed') as Error & { code: string }; error.code = 'EMAIL_API_ERROR'; throw error; }
+      this.lastVerifiedAt = new Date();
+      this.lastFailure = undefined;
+      return { accepted: true as const };
+    }
+    if (!this.transporter) throw new Error('SMTP transport is unavailable');
     const info = await this.transporter.sendMail({
       from: { address: SMTP_FROM, name: SMTP_FROM_NAME || product },
       to: payload.to,
       messageId: `<${messageId}@gloomi.local>`,
-      subject: isReset ? 'Reset your gloomi password' : 'Your gloomi verification code',
-      text: isReset ? `Your password reset code is ${payload.code}. It expires in 10 minutes.` : `Your gloomi code is ${payload.code}. It expires in 10 minutes.`,
-      html: isReset
-        ? `<p>Use this code to reset your password:</p><strong style="font-size:28px;letter-spacing:8px">${code}</strong><p>It expires in 10 minutes.</p>`
-        : `<p>Your gloomi verification code:</p><strong style="font-size:28px;letter-spacing:8px">${code}</strong><p>It expires in 10 minutes.</p>`,
+      subject,
+      text,
+      html,
     });
     const accepted = (info.accepted || []).some((address: string | { address: string }) =>
       (typeof address === 'string' ? address : address.address).toLowerCase() === payload.to.toLowerCase());

@@ -5,9 +5,11 @@ Mobile-first social network starter based on the provided gloomi Figma screens. 
 ## Stack
 
 - `apps/web`: React, TypeScript, Vite, React Router, TanStack Query, Axios, CSS variables.
-- `apps/api`: NestJS REST API, Socket.IO gateway, JWT authentication, DTO validation, bcrypt password hashing, direct Gmail SMTP, private local media lifecycle, optional S3 adapter and legacy queue/worker mode.
+- `apps/api`: NestJS REST API, Socket.IO gateway, JWT authentication, DTO validation, bcrypt password hashing, Nodemailer SMTP plus an HTTPS Resend option, private local media lifecycle, S3-compatible storage and optional legacy queue/worker mode.
 - `prisma`: PostgreSQL schema and migrations.
 - `infrastructure/terraform`: legacy AWS RDS/ECS/CloudFront template. It is not the selected Neon architecture and may create billable resources if applied.
+- `wrangler.jsonc` and [Cloudflare deployment guide](docs/cloudflare.md): Cloudflare Pages configuration for the static frontend. The current API requires a Node.js host.
+- `render.yaml` and [Render deployment guide](docs/render.md): free Node.js Web Service configuration, Resend HTTPS email, process-local rate limits, and Cloudflare R2 uploads.
 - `docker-compose.yml`: local PostgreSQL, Redis, Mailpit, and isolated integration-test databases.
 
 ## Local development
